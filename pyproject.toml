@@ -1,0 +1,62 @@
+[build-system]
+# Pin below 1.30: hatchling 1.30 emits Metadata-Version 2.5, which current
+# packaging/twine (and PyPI's validator) reject. 2.4 is the accepted version.
+requires = ["hatchling>=1.27,<1.30"]
+build-backend = "hatchling.build"
+
+[project]
+name = "domainflow"
+version = "0.1.0"
+description = "Discover, monitor, score, and cluster brand-impersonation domains — a layered, pip-extras toolkit for the lookalike-domain lifecycle, from typo-squat generation to actor-campaign clustering."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [{ name = "Vinay Vobbilichetty", email = "vinayvobbilichetty11@gmail.com" }]
+keywords = [
+    "typosquatting", "lookalike-domains", "brand-protection", "phishing",
+    "domain-monitoring", "threat-intelligence", "cybersecurity", "dfir",
+    "certificate-transparency", "whois", "dnstwist",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+# Core (discovery + clustering) is stdlib-only — install plain `domainflow`.
+dependencies = []
+
+[project.optional-dependencies]
+# Certificate Transparency discovery via crt.sh.
+ct = ["requests>=2.25"]
+# WHOIS snapshot + change detection.
+whois = ["python-whois>=0.9"]
+# Weaponization scoring: page fetch + MX/SPF/DMARC signals.
+score = ["requests>=2.25", "dnspython>=2.0"]
+# Bring-your-own-LLM verdict over any OpenAI-compatible chat endpoint.
+llm = ["requests>=2.25"]
+# Everything.
+all = ["requests>=2.25", "python-whois>=0.9", "dnspython>=2.0"]
+# Test/dev tooling.
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+domainflow = "domainflow.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/vinayvobbili/domainflow"
+Repository = "https://github.com/vinayvobbili/domainflow"
+Issues = "https://github.com/vinayvobbili/domainflow/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/domainflow"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
