@@ -92,6 +92,28 @@ score.score("acme-login.com", brand="acme", llm=llm)
 Offline, the tier comes from a deterministic heuristic over page + MX/SPF/DMARC
 signals. No model required.
 
+`score` is *point-in-time*. To catch the strongest tell — a lookalike that sat
+dormant for weeks and then **suddenly went live** (deliberate, aged
+infrastructure) — diff this scan against the last one:
+
+```python
+prev = load_last_score("acme-login.com")        # whatever you stored last scan
+now = score.score("acme-login.com", brand="acme")
+
+t = score.transition(prev, now, dormant_days=92)
+if t["became_active"]:
+    print(t["recommended_tier"], t["rationale"])  # e.g. P2 → escalated to P1
+```
+
+On a dormant→live flip, `transition` recommends a one-notch escalation above the
+point-in-time tier — a freshly-activated aged domain outranks a brand-new live
+one of the same tier. It also reports `went_dormant`, `escalated`/`deescalated`,
+and is pure (no network), so it works without the `score` extra.
+
+> Retention tip: don't expire dormant lookalikes. The quiet domain at day 31 is
+> exactly the one this catches when it activates — archive, don't delete, and
+> keep its `first_seen` so you can pass `dormant_days`.
+
 ### `cluster` — group findings into campaigns
 
 ```python

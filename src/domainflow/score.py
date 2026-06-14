@@ -15,6 +15,10 @@ A deterministic heuristic produces the tier offline. For a sharper verdict, pass
 signals are handed to your model (bring-your-own-LLM, no vendor lock-in). A
 ready-made OpenAI-compatible caller is provided as :func:`openai_verdict`.
 
+The tier is *point-in-time*. To catch the dormant→live flip across scans — a
+lookalike that sat parked for weeks and then suddenly stood up, the strongest
+weaponization tell — diff two scores with :func:`transition`.
+
 Requires the ``score`` extra (``pip install domainflow[score]``) for the page
 fetch + DNS lookups.
 
@@ -160,6 +164,119 @@ def heuristic_tier(signals: Dict[str, Any]) -> Dict[str, Any]:
                 "rationale": "Registered and reachable/mail-capable but no impersonation markers — monitor."}
     return {"tier": "P4", "is_active_phishing": False,
             "rationale": "Not reachable and not mail-capable — registered placeholder or benign."}
+
+
+_TIER_RANK = {"P1": 4, "P2": 3, "P3": 2, "P4": 1}
+_TIER_ORDER = ["P4", "P3", "P2", "P1"]
+
+
+def _activity(result: Optional[Dict[str, Any]]) -> tuple:
+    """Normalize a :func:`score`/`:func:`heuristic_tier`/`:func:`gather_signals`
+    dict to ``(is_live, tier_rank, tier)``. ``is_live`` is True when the domain
+    is reachable or mail-capable — i.e. stood up, not dormant.
+    """
+    if not result:
+        return (False, 0, None)
+    tier = result.get("tier")
+    if not tier:
+        v = result.get("verdict")
+        if isinstance(v, dict):
+            tier = v.get("tier")
+    sig = result.get("signals") if isinstance(result.get("signals"), dict) else result
+    p = (sig or {}).get("page") or {}
+    d = (sig or {}).get("dns") or {}
+    is_live = bool(p.get("reachable") or d.get("has_mx"))
+    return (is_live, _TIER_RANK.get((tier or "").upper(), 0), (tier or "").upper() or None)
+
+
+def _bump(tier: Optional[str]) -> Optional[str]:
+    """Escalate a tier one notch toward P1 (capped at P1)."""
+    if tier not in _TIER_RANK:
+        return tier
+    i = _TIER_ORDER.index(tier)
+    return _TIER_ORDER[min(i + 1, len(_TIER_ORDER) - 1)]
+
+
+def transition(previous: Optional[Dict[str, Any]], current: Dict[str, Any],
+               *, dormant_days: Optional[float] = None) -> Dict[str, Any]:
+    """Compare two point-in-time scores of the *same* domain over time and detect
+    the dormant→active flip — the strongest weaponization tell there is.
+
+    :func:`score` is point-in-time: it asks "is this domain weaponized *right
+    now?*". But a lookalike that sat parked/dormant for weeks and then *suddenly*
+    stands up is far more suspicious than a freshly-discovered live domain of the
+    same tier — that delayed activation is deliberate, aged infrastructure. This
+    function captures that movement and, on a became-active flip, recommends a
+    one-notch escalation above the point-in-time tier.
+
+    Args:
+        previous: an earlier :func:`score` result, :func:`heuristic_tier` verdict,
+            or raw :func:`gather_signals` dict — whatever you stored last scan.
+            ``None`` is treated as "never observed live before".
+        current: the latest score/verdict/signals dict for the same domain.
+        dormant_days: optional age of the dormancy that just ended (e.g. from your
+            stored ``first_seen``). Sharpens the rationale; longer = more
+            deliberate. Does not change the recommended tier on its own.
+
+    Returns:
+        ``{domain, previous_tier, current_tier, recommended_tier, became_active,
+        went_dormant, escalated, deescalated, priority_boost, dormant_days,
+        rationale}``. When nothing meaningful changed, ``recommended_tier`` equals
+        ``current_tier`` and ``priority_boost`` is False.
+    """
+    prev_live, prev_rank, prev_tier = _activity(previous)
+    cur_live, cur_rank, cur_tier = _activity(current)
+
+    became_active = (not prev_live) and cur_live
+    went_dormant = prev_live and (not cur_live)
+    escalated = cur_rank > prev_rank > 0
+    deescalated = 0 < cur_rank < prev_rank
+
+    recommended_tier = cur_tier
+    priority_boost = False
+    if became_active and cur_tier:
+        bumped = _bump(cur_tier)
+        if bumped != cur_tier:
+            recommended_tier = bumped
+            priority_boost = True
+
+    if became_active:
+        age = ""
+        if dormant_days is not None:
+            age = (f" after ~{int(dormant_days)} days dormant"
+                   if dormant_days >= 1 else " after a brief dormancy")
+        rationale = (
+            f"Domain was dormant (parked/unreachable) and just went live{age} — "
+            "delayed activation of aged infrastructure is a deliberate weaponization "
+            "tell. Escalate above a freshly-stood-up domain of the same tier."
+        )
+    elif went_dormant:
+        rationale = ("Previously live, now dormant (taken down, parked, or rotated "
+                     "off). Keep watching — actors recycle aged domains.")
+    elif escalated:
+        rationale = (f"Weaponization advanced {prev_tier or '?'}→{cur_tier or '?'} "
+                     "between observations.")
+    elif deescalated:
+        rationale = (f"Weaponization receded {prev_tier or '?'}→{cur_tier or '?'} "
+                     "between observations.")
+    else:
+        rationale = "No material change in weaponization state between observations."
+
+    domain = (current.get("domain")
+              or ((current.get("signals") or {}).get("domain") if isinstance(current.get("signals"), dict) else None))
+    return {
+        "domain": domain,
+        "previous_tier": prev_tier,
+        "current_tier": cur_tier,
+        "recommended_tier": recommended_tier,
+        "became_active": became_active,
+        "went_dormant": went_dormant,
+        "escalated": escalated,
+        "deescalated": deescalated,
+        "priority_boost": priority_boost,
+        "dormant_days": dormant_days,
+        "rationale": rationale,
+    }
 
 
 def facts_prompt(signals: Dict[str, Any]) -> str:
