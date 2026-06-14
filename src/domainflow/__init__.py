@@ -19,7 +19,7 @@ from .models import Campaign, Finding, Lookalike
 from .discover import generate_lookalikes, FUZZERS
 from .cluster import cluster_campaigns
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "Campaign",
